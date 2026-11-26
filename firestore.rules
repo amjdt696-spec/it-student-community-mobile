@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function approved() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "approved";
+    }
+    function admin() { return signedIn() && request.auth.token.admin == true; }
+
+    match /users/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(["displayName","status","role","createdAt"])
+        && request.resource.data.status == "pending"
+        && request.resource.data.role == "student";
+      allow read: if signedIn() && (request.auth.uid == uid || admin());
+      allow update: if admin();
+      allow delete: if admin();
+    }
+
+    match /groups/main/messages/{messageId} {
+      allow read: if approved();
+      allow create: if approved()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.senderName is string
+        && request.resource.data.senderName.size() <= 60
+        && request.resource.data.keys().hasOnly(["text","senderId","senderName","createdAt","fileUrl","fileName","storagePath"])
+        && (
+          (request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 3000)
+          || (request.resource.data.fileUrl is string && request.resource.data.fileName is string && request.resource.data.storagePath is string)
+        );
+      allow update, delete: if admin();
+    }
+
+    match /announcements/{id} {
+      allow read: if approved();
+      allow create, update, delete: if admin();
+    }
+    match /resources/{id} {
+      allow read: if approved();
+      allow create, update, delete: if admin();
+    }
+    // لا توجد قواعد لمحادثات خاصة أو مجموعات أخرى: الوصول إليها مرفوض افتراضيًا.
+  }
+}
